@@ -20,7 +20,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 const LS_KEY = 'skrb_gvg_3v3_v4_combo_both';
 
 const HEROES = [
-  'Ace','Alice','Aragon','Ariel','Aris','Asura','Ballista','Bane','Bi Dam','Biscuit','Black Rose','Catty','Chancellor','Chloe','Cleo','Colt','Daisy','Dellons','Eileene','Espada','Evan','Fai','Feng Yan','Heavenia','Hellenia','Hokin','Jane','Jave','Jin','Joker','Jupy','Juri','Karin','Karma','Karon','Knox','Kris','Kyle','Kyrielle','Lania','Leo','Li','Lina','Lucy','May','Mercure','Nia','Noho','Orkah','Orly','Pascal','Platin','Rachel','Rahkun','Rei','Rin','Rook','Rosie','Rudy','Ruri','Sarah','Sera','Shane','Sieg','Silvesta','Snipper','Soi','Spike','Sylvia','Taka','Teo','Vanessa','Velika','Victoria','Yeonhee','Yu Shin','Yui','Yuri','Irene','Kagura'
+  'Ace','Alice','Aragon','Ariel','Aris','Asura','Ballista','Bane','Bi Dam','Biscuit','Black Rose','Catty','Chancellor','Chloe','Cleo','Colt','Daisy','Dellons','Eileene','Espada','Evan','Fai','Feng Yan','Heavenia','Hellenia','Hokin','Jane','Jave','Jin','Joker','Jupy','Juri','Karin','Karma','Karon','Knox','Kris','Kyle','Kyrielle','Lania','Leo','Li','Lina','Lucy','May','Mercure','Nia','Noho','Orkah','Orly','Pascal','Platin','Rachel','Rahkun','Rei','Rin','Rook','Rosie','Rudy','Ruri','Sarah','Sera','Shane','Sieg','Silvesta','Snipper','Soi','Spike','Sylvia','Taka','Teo','Vanessa','Velika','Victoria','Yeonhee','Yu Shin','Yui','Yuri','Irene','Kagura','Amelia'
 ].sort();
 
 // ---------- utils ----------
