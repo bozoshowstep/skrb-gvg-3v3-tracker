@@ -19,7 +19,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 // -------------------- Config --------------------
 const LS_KEY = 'skrb_gvg_3v3_v2';
 
-// === รายชื่อตัวละคร (fallback ถ้าโหลดจาก Supabase ไม่ได้) ===
+// === รายชื่อตัวละคร (แก้ไขได้) ===
 const HEROES = [
   'Ace','Alice','Aragon','Ariel','Aris','Asura','Ballista','Bane','Bi Dam','Biscuit','Black Rose',
   'Catty','Chancellor','Chloe','Cleo','Colt','Daisy','Dellons','Eileene','Espada','Evan','Fai','Feng Yan',
@@ -74,6 +74,28 @@ function newId() {
 function formatPercent(n, digits = 1) {
   if (!isFinite(n)) return '0%';
   return `${(n * 100).toFixed(digits)}%`;
+}
+
+// === Skill helpers ===
+// แปลง object skills เป็น label สั้น ๆ เช่น {0:'บน',2:'ล่าง'} -> "#1:บน #3:ล่าง"
+function compactSkill(sk) {
+  if (!sk) return '';
+  const parts = ['0', '1', '2']
+    .filter((k) => sk[k])
+    .map((k) => `#${+k + 1}:${sk[k]}`);
+  return parts.join(' ');
+}
+// นับความถี่แล้วคืนค่า Top N รูปแบบ [{val, count}, ...]
+function topFreq(arr, limit = 3) {
+  const m = new Map();
+  for (const s of arr) {
+    if (!s) continue;
+    m.set(s, (m.get(s) || 0) + 1);
+  }
+  return Array.from(m.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([val, count]) => ({ val, count }));
 }
 
 // -------------------- (optional) Supabase --------------------
@@ -157,8 +179,7 @@ function Textarea({ label, value, onChange, placeholder }) {
 }
 
 // -------------------- Hero Autocomplete --------------------
-// 🔧 ปรับให้รับรายชื่อฮีโร่จาก props (allHeroes) เพื่อใช้ลิสต์จาก Supabase
-function HeroInput({ label, value, onChange, placeholder, allHeroes = HEROES }) {
+function HeroInput({ label, value, onChange, placeholder }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState(value || '');
   const boxRef = useRef(null);
@@ -172,13 +193,12 @@ function HeroInput({ label, value, onChange, placeholder, allHeroes = HEROES }) 
   }, []);
 
   const suggestions = useMemo(() => {
-    const pool = Array.isArray(allHeroes) && allHeroes.length ? allHeroes : HEROES;
     const needle = cleanWhitespace(q).toLowerCase();
-    if (!needle) return pool.slice(0, 30);
-    const starts = pool.filter((h) => h.toLowerCase().startsWith(needle));
-    const contains = pool.filter((h) => !h.toLowerCase().startsWith(needle) && h.toLowerCase().includes(needle));
+    if (!needle) return HEROES.slice(0, 30);
+    const starts = HEROES.filter((h) => h.toLowerCase().startsWith(needle));
+    const contains = HEROES.filter((h) => !h.toLowerCase().startsWith(needle) && h.toLowerCase().includes(needle));
     return [...starts, ...contains].slice(0, 30);
-  }, [q, allHeroes]);
+  }, [q]);
 
   return (
     <div className="flex flex-col gap-1" ref={boxRef}>
@@ -290,27 +310,6 @@ export default function Page() {
   // local dataset (fallback)
   const [data, setData] = useLocalData();
 
-  // ✅ รายชื่อฮีโร่จาก Supabase (ถ้าโหลดไม่ได้จะใช้ HEROES เป็น fallback)
-  const [heroList, setHeroList] = useState(HEROES);
-  useEffect(() => {
-    const fetchHeroes = async () => {
-      if (!supabase) return; // ไม่มี ENV ก็ใช้ fallback
-      try {
-        const { data: hs, error } = await supabase
-          .from('heroes')
-          .select('name')
-          .eq('is_active', true)
-          .order('name', { ascending: true });
-        if (!error && Array.isArray(hs) && hs.length) {
-          setHeroList(hs.map((x) => x.name));
-        }
-      } catch (e) {
-        console.error('Load heroes failed', e);
-      }
-    };
-    fetchHeroes();
-  }, []);
-
   // Add form
   const [atk, setAtk] = useState(['', '', '']);
   const [def, setDef] = useState(['', '', '']);
@@ -376,7 +375,7 @@ export default function Page() {
     reader.readAsText(file);
   }
 
-  // Search stats (by DEFENDER -> aggregate ATTACKERS)
+  // Search stats (by DEFENDER -> aggregate ATTACKERS) + Top skill patterns
   const searchStats = useMemo(() => {
     const qKey = teamKey(qDef);
     const qNames = normalizeTeam(qDef);
@@ -387,6 +386,9 @@ export default function Page() {
     const map = new Map();
     for (const m of matches) {
       const aKey = teamKey(m.attackers);
+      const atkSkillStr = compactSkill(m.skills?.attacker);
+      const defSkillStr = compactSkill(m.skills?.defender);
+
       const bucket = map.get(aKey) || {
         sideTeam: m.attackers,
         total: 0,
@@ -394,12 +396,18 @@ export default function Page() {
         notes: [],
         tags: [],
         lastAt: 0,
+        atkSkills: [],
+        defSkills: [],
       };
+
       bucket.total += 1;
       if (m.result === 'WIN') bucket.wins += 1;
       if (m.notes) bucket.notes.push(m.notes);
       if (m.tags?.length) bucket.tags.push(...m.tags);
+      if (atkSkillStr) bucket.atkSkills.push(atkSkillStr);
+      if (defSkillStr) bucket.defSkills.push(defSkillStr);
       bucket.lastAt = Math.max(bucket.lastAt, m.createdAt || 0);
+
       map.set(aKey, bucket);
     }
 
@@ -412,6 +420,8 @@ export default function Page() {
         notes: uniq(b.notes),
         tags: uniq(b.tags),
         lastAt: b.lastAt,
+        topAtkSkills: topFreq(b.atkSkills, 3),
+        topDefSkills: topFreq(b.defSkills, 3),
       }))
       .sort((a, b) => b.total - a.total || b.winRate - a.winRate || b.lastAt - a.lastAt);
 
@@ -511,9 +521,9 @@ export default function Page() {
           actions={<div className="text-xs text-slate-600">ใช้คีย์แบบไม่สนลำดับ</div>}
         >
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <HeroInput label="Defender #1" value={qDef[0]} onChange={(v) => setQDef([v, qDef[1], qDef[2]])} placeholder="เช่น Orkah" allHeroes={heroList} />
-            <HeroInput label="Defender #2" value={qDef[1]} onChange={(v) => setQDef([qDef[0], v, qDef[2]])} placeholder="เช่น Jave" allHeroes={heroList} />
-            <HeroInput label="Defender #3" value={qDef[2]} onChange={(v) => setQDef([qDef[0], qDef[1], v])} placeholder="เช่น Karin" allHeroes={heroList} />
+            <HeroInput label="Defender #1" value={qDef[0]} onChange={(v) => setQDef([v, qDef[1], qDef[2]])} placeholder="เช่น Orkah" />
+            <HeroInput label="Defender #2" value={qDef[1]} onChange={(v) => setQDef([qDef[0], v, qDef[2]])} placeholder="เช่น Jave" />
+            <HeroInput label="Defender #3" value={qDef[2]} onChange={(v) => setQDef([qDef[0], qDef[1], v])} placeholder="เช่น Karin" />
           </div>
           <div className="mt-4 flex items-center gap-3">
             <Button onClick={() => setQDef([...qDef])}>ค้นหา</Button>
@@ -528,28 +538,53 @@ export default function Page() {
             <div className="mt-6 space-y-3">
               {searchStats.rows.length > 0 ? (
                 searchStats.rows.map((row, idx) => (
-                  <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center rounded-xl border border-slate-200 p-3 bg-white">
-                    <div className="md:col-span-4">
+                  <div
+                    key={idx}
+                    className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center rounded-xl border border-slate-200 p-3 bg-white"
+                  >
+                    <div className="md:col-span-3">
                       <div className="text-[11px] text-slate-500 mb-1">Attacker</div>
                       <TeamPill names={row.sideTeam} />
                     </div>
+
                     <div className="md:col-span-2">
                       <div className="text-[11px] text-slate-500 mb-1">Win rate</div>
                       <div className="text-base font-semibold">{formatPercent(row.winRate)}</div>
                     </div>
-                    <div className="md:col-span-2">
+
+                    <div className="md:col-span-1">
                       <div className="text-[11px] text-slate-500 mb-1">Matches</div>
                       <div className="text-base font-semibold">{row.total}</div>
                     </div>
-                    <div className="md:col-span-4">
-                      <div className="flex flex-wrap gap-1 mb-1">
-                        {row.tags.map((t) => (<Badge key={t}>{t}</Badge>))}
+
+                    <div className="md:col-span-3">
+                      <div className="text-[11px] text-slate-500 mb-1">Top Attacker Skills</div>
+                      <div className="flex flex-wrap gap-1">
+                        {row.topAtkSkills.length > 0 ? (
+                          row.topAtkSkills.map((s) => (
+                            <Badge key={`atk-${s.val}`}>
+                              {s.val} × {s.count}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-[12px] text-slate-400">—</span>
+                        )}
                       </div>
-                      {row.notes.length > 0 && (
-                        <div className="text-[12px] text-slate-600 line-clamp-2">
-                          {row.notes.join(' • ')}
-                        </div>
-                      )}
+                    </div>
+
+                    <div className="md:col-span-3">
+                      <div className="text-[11px] text-slate-500 mb-1">Top Defender Skills</div>
+                      <div className="flex flex-wrap gap-1">
+                        {row.topDefSkills.length > 0 ? (
+                          row.topDefSkills.map((s) => (
+                            <Badge key={`def-${s.val}`}>
+                              {s.val} × {s.count}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-[12px] text-slate-400">—</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -564,9 +599,9 @@ export default function Page() {
         <div className="h-6" />
         <Card title="บันทึกแมตช์ใหม่" actions={null}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <HeroInput label="Attacker #1" value={atk[0]} onChange={(v) => setAtk([v, atk[1], atk[2]])} placeholder="Vanessa" allHeroes={heroList} />
-            <HeroInput label="Attacker #2" value={atk[1]} onChange={(v) => setAtk([atk[0], v, atk[2]])} placeholder="Eileene" allHeroes={heroList} />
-            <HeroInput label="Attacker #3" value={atk[2]} onChange={(v) => setAtk([atk[0], atk[1], v])} placeholder="Rudy" allHeroes={heroList} />
+            <HeroInput label="Attacker #1" value={atk[0]} onChange={(v) => setAtk([v, atk[1], atk[2]])} placeholder="Vanessa" />
+            <HeroInput label="Attacker #2" value={atk[1]} onChange={(v) => setAtk([atk[0], v, atk[2]])} placeholder="Eileene" />
+            <HeroInput label="Attacker #3" value={atk[2]} onChange={(v) => setAtk([atk[0], atk[1], v])} placeholder="Rudy" />
           </div>
 
           <div className="mt-3">
@@ -579,9 +614,9 @@ export default function Page() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
-            <HeroInput label="Defender #1" value={def[0]} onChange={(v) => setDef([v, def[1], def[2]])} placeholder="Orkah" allHeroes={heroList} />
-            <HeroInput label="Defender #2" value={def[1]} onChange={(v) => setDef([def[0], v, def[2]])} placeholder="Jave" allHeroes={heroList} />
-            <HeroInput label="Defender #3" value={def[2]} onChange={(v) => setDef([def[0], def[1], v])} placeholder="Karin" allHeroes={heroList} />
+            <HeroInput label="Defender #1" value={def[0]} onChange={(v) => setDef([v, def[1], def[2]])} placeholder="Orkah" />
+            <HeroInput label="Defender #2" value={def[1]} onChange={(v) => setDef([def[0], v, def[2]])} placeholder="Jave" />
+            <HeroInput label="Defender #3" value={def[2]} onChange={(v) => setDef([def[0], def[1], v])} placeholder="Karin" />
           </div>
 
           <div className="mt-3">
